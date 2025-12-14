@@ -2,8 +2,11 @@ package gitcalendarcore
 
 import (
 	"fmt"
+	"os"
+	"path"
 
 	"github.com/go-git/go-git/v6"
+	"github.com/rdleal/intervalst/interval"
 )
 
 type (
@@ -11,31 +14,110 @@ type (
 	//
 	// cannot expose channels, maps or some goofy types which do not have bindings to other languages
 	Api interface {
-		AddEvent(Event) error
-		RemoveEvent(Event) error
-		GetEvents(from int64, to int64) ([]Event, error) // TODO: check that it gets translated to a throwing exception for Kotlin/JS
+		Initialize(repoPath string) error
+		Clone(repoUrl, repoPath string) error
+		// AddRemote()
+
+		AddEvent(*Event) error // TODO: check that it gets translated to a throwing exception for Kotlin/JS
+		UpdateEvent(*Event) error
+		RemoveEvent(*Event) error
+		GetEvents(from int64, to int64) ([]Event, error)
 	}
 
 	apiImpl struct {
-		repo *git.Repository
+		eventTree *interval.SearchTree[*Event, int64]
+		repo      *git.Repository
 	}
 )
 
 func NewApi() Api {
-	return &apiImpl{}
+	var api apiImpl
+	api.eventTree = interval.NewSearchTree[*Event](func(x, y int64) int { return int(x - y) })
+	return &api
 }
 
-func (g *apiImpl) AddEvent(e Event) error {
+func (a *apiImpl) AddEvent(e *Event) error {
 	if err := e.Validate(); err != nil {
 		return fmt.Errorf("invalid event data: %w", err)
 	}
+
+	err := a.eventTree.Insert(e.From, e.To, e)
+	if err != nil {
+		return fmt.Errorf("failed to insert into index tree: %w", err)
+	}
+
+	return err
+}
+
+func (a *apiImpl) UpdateEvent(e *Event) error {
+	if err := e.Validate(); err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+
 	return nil
 }
 
-func (g *apiImpl) RemoveEvent(e Event) error {
+func (a *apiImpl) RemoveEvent(e *Event) error {
 	return nil
 }
 
-func (g *apiImpl) GetEvents(from int64, to int64) ([]Event, error) {
+func (a *apiImpl) GetEvents(from int64, to int64) ([]Event, error) {
 	return nil, nil
+}
+
+func (a *apiImpl) Initialize(repoPath string) error {
+	// ensure the base directory exists
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		return fmt.Errorf("failed to create repository directory: %w", err)
+	}
+
+	// if it doesn't exist, initialize a new one
+	repo, err := git.PlainInit(repoPath, false) // `false` for non-bare repo (has a worktree)
+
+	if err == git.ErrTargetDirNotEmpty {
+		repo, err := git.PlainOpen(repoPath)
+		if err != nil {
+			return fmt.Errorf("failed to open repository: %w", err)
+		}
+		a.repo = repo
+		return nil
+
+	} else if err != nil {
+		return fmt.Errorf("failed to initialize new repository: %w", err)
+	}
+
+	a.repo = repo
+
+	// create the events directory and an initial commit to ensure a master branch exists
+	err = a.setupInitialRepoStructure(repoPath)
+	return err
+}
+
+func (a *apiImpl) Clone(repoUrl, repoPath string) error {
+	// check if the directory already exists and is non-empty
+	if _, err := os.Stat(repoPath); err == nil {
+		// if the directory exists, try to open it instead of cloning over it.
+		// if the user meant to re-clone, they should delete the directory first.
+		return a.Initialize(repoPath)
+	}
+
+	repo, err := git.PlainClone(repoPath, &git.CloneOptions{
+		URL:      repoUrl,
+		Progress: os.Stdout, // optional: for logging clone progress
+	})
+	if err != nil {
+		return fmt.Errorf("failed to clone repository from '%s': %w", repoUrl, err)
+	}
+
+	a.repo = repo
+	return nil
+}
+
+func (a *apiImpl) setupInitialRepoStructure(repoPath string) error {
+	err := os.Mkdir(path.Join(repoPath, EventsDirName), 0o755)
+	if err != nil {
+		return fmt.Errorf("failed to create folder '%s': %w", path.Join(repoPath, EventsDirName), err)
+	}
+
+	return nil
 }

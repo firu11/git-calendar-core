@@ -1,24 +1,26 @@
 package gitcalendarcore
 
-import "errors"
+import (
+	"errors"
+)
 
 type Event struct {
-	Id              int
-	Title           string
-	Location        string
-	FromTimestampMS int64 // not using time.Time for cross-lang compatibility
-	ToTimestampMS   int64
+	Id       int    `json:"id"`
+	Title    string `json:"title"`
+	Location string `json:"location"`
+	From     int64  `json:"from"` // unix timestamp in seconds (not using time.Time for cross lang. compatibility)
+	To       int64  `json:"to"`   // unix timestamp in seconds (not using time.Time for cross lang. compatibility)
 }
 
 func (e *Event) Validate() error {
 	if e.Title == "" {
 		return errors.New("event title cannot be empty")
 	}
-	if e.FromTimestampMS < 0 || e.ToTimestampMS < 0 {
+	if e.From < 0 || e.To < 0 {
 		return errors.New("event timestamps cannot be before epoch (less than 0)")
 	}
-	if e.FromTimestampMS >= e.ToTimestampMS {
-		return errors.New("event `from` timestamp cannot be greater or equal than `to` (cannot end before it starts)")
+	if e.From >= e.To {
+		return errors.New("event 'from' timestamp cannot be greater or equal than 'to' (cannot end before it starts)")
 	}
 	return nil
 }

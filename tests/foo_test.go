@@ -11,10 +11,10 @@ func TestFoo(t *testing.T) {
 	g := core.NewApi()
 
 	err := g.AddEvent(
-		core.Event{
-			Title:           "FooEvent",
-			FromTimestampMS: time.Now().Unix(),
-			ToTimestampMS:   time.Now().Add(2 * time.Hour).Unix(),
+		&core.Event{
+			Title: "Foo Event",
+			From:  time.Now().Unix(),
+			To:    time.Now().Add(2 * time.Hour).Unix(),
 		},
 	)
 	if err != nil {
