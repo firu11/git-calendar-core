@@ -2,7 +2,6 @@ package gitcalendarcore
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/go-git/go-git/v6"
 )
@@ -10,11 +9,11 @@ import (
 type (
 	// The exposed API interface
 	//
-	// cannot expose channels or maps (they do not have a binding to other languages)
+	// cannot expose channels, maps or some goofy types which do not have bindings to other languages
 	Api interface {
 		AddEvent(Event) error
 		RemoveEvent(Event) error
-		GetEvents(from time.Time, to time.Time) ([]Event, error) // TODO: check that it gets translated to a throwing exception for Kotlin/JS
+		GetEvents(from int64, to int64) ([]Event, error) // TODO: check that it gets translated to a throwing exception for Kotlin/JS
 	}
 
 	apiImpl struct {
@@ -37,6 +36,6 @@ func (g *apiImpl) RemoveEvent(e Event) error {
 	return nil
 }
 
-func (g *apiImpl) GetEvents(from time.Time, to time.Time) ([]Event, error) {
+func (g *apiImpl) GetEvents(from int64, to int64) ([]Event, error) {
 	return nil, nil
 }
