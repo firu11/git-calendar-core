@@ -1,11 +1,15 @@
 package gitcalendarcore
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
+	"time"
 
 	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/rdleal/intervalst/interval"
 )
 
@@ -26,6 +30,7 @@ type (
 
 	apiImpl struct {
 		eventTree *interval.SearchTree[*Event, int64]
+		repoPath  string
 		repo      *git.Repository
 	}
 )
@@ -41,9 +46,49 @@ func (a *apiImpl) AddEvent(e *Event) error {
 		return fmt.Errorf("invalid event data: %w", err)
 	}
 
+	// -------- insert into tree --------
 	err := a.eventTree.Insert(e.From, e.To, e)
 	if err != nil {
 		return fmt.Errorf("failed to insert into index tree: %w", err)
+	}
+
+	// -------- create json file --------
+	data, err := json.MarshalIndent(e, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal event to JSON: %w", err)
+	}
+
+	filename := fmt.Sprintf("%d.json", e.Id)
+	filePath := filepath.Join(a.repoPath, EventsDirName, filename)
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write event file: %w", err)
+	}
+
+	// -------- add to git repo --------
+	w, err := a.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	relativePath := filepath.Join(EventsDirName, filename)
+	if _, err := w.Add(relativePath); err != nil {
+		return fmt.Errorf("failed to stage event file: %w", err)
+	}
+
+	_, err = w.Commit(
+		fmt.Sprintf("CALENDAR: Added event '%s'", e.Title),
+		&git.CommitOptions{
+			Author: &object.Signature{
+				Name:  "git-calendar",
+				Email: "",
+				When:  time.Now(),
+			},
+		},
+	)
+	if err != nil {
+		// TODO idk
+		w.Remove(relativePath)
+		return fmt.Errorf("failed to commit event: %w", err)
 	}
 
 	return err
@@ -70,6 +115,8 @@ func (a *apiImpl) Initialize(repoPath string) error {
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create repository directory: %w", err)
 	}
+
+	a.repoPath = repoPath
 
 	// if it doesn't exist, initialize a new one
 	repo, err := git.PlainInit(repoPath, false) // `false` for non-bare repo (has a worktree)
