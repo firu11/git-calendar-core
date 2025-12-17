@@ -3,13 +3,15 @@ package gitcalendarcore
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path"
 	"path/filepath"
 	"time"
 
-	"github.com/go-git/go-git/v6"
-	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/firu11/git-calendar-core/filesystem"
+	"github.com/go-git/go-billy/v5"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/cache"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	gogitfs "github.com/go-git/go-git/v5/storage/filesystem"
 	"github.com/rdleal/intervalst/interval"
 )
 
@@ -35,13 +37,22 @@ type (
 		events    map[int]*Event
 		repoPath  string
 		repo      *git.Repository
+		fs        billy.Filesystem
 	}
 )
 
 func NewApi() Api {
 	var api apiImpl
+
 	api.eventTree = interval.NewSearchTree[int](func(x, y int64) int { return int(x - y) })
 	api.events = make(map[int]*Event)
+
+	var err error
+	api.fs, err = filesystem.GetRepoFS()
+	if err != nil {
+		panic(err)
+	}
+
 	return &api
 }
 
@@ -68,11 +79,22 @@ func (a *apiImpl) AddEvent(eventJson string) error {
 		return fmt.Errorf("failed to marshal event to JSON: %w", err)
 	}
 
+	dirPath := filepath.Join(a.repoPath, EventsDirName)
+	err = a.fs.MkdirAll(dirPath, 0o755) // Ensure the 'events' folder exists
+	if err != nil {
+		return fmt.Errorf("failed to create events directory: %w", err)
+	}
+
 	filename := fmt.Sprintf("%d.json", e.Id)
 	filePath := filepath.Join(a.repoPath, EventsDirName, filename)
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+	file, err := a.fs.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create event file: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
 		return fmt.Errorf("failed to write event file: %w", err)
 	}
+	file.Close()
 
 	if a.repo == nil {
 		return fmt.Errorf("repo not initialized")
@@ -84,8 +106,8 @@ func (a *apiImpl) AddEvent(eventJson string) error {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
-	relativePath := filepath.Join(EventsDirName, filename)
-	if _, err := w.Add(relativePath); err != nil {
+	gitPath := filepath.ToSlash(filePath)
+	if _, err := w.Add(gitPath); err != nil {
 		return fmt.Errorf("failed to stage event file: %w", err)
 	}
 
@@ -101,7 +123,7 @@ func (a *apiImpl) AddEvent(eventJson string) error {
 	)
 	if err != nil {
 		// TODO idk
-		w.Remove(relativePath)
+		w.Remove(gitPath)
 		return fmt.Errorf("failed to commit event: %w", err)
 	}
 
@@ -154,60 +176,60 @@ func (a *apiImpl) GetEvents(from int64, to int64) (string, error) {
 }
 
 func (a *apiImpl) Initialize(repoPath string) error {
-	// ensure the base directory exists
-	if err := os.MkdirAll(repoPath, 0o755); err != nil {
-		return fmt.Errorf("failed to create repository directory: %w", err)
-	}
-
 	a.repoPath = repoPath
 
-	// if it doesn't exist, initialize a new one
-	repo, err := git.PlainInit(repoPath, false) // `false` for non-bare repo (has a worktree)
+	_, err := a.fs.Stat(".git")
 
-	if err == git.ErrTargetDirNotEmpty {
-		repo, err := git.PlainOpen(repoPath)
+	dotGitFs, _ := a.fs.Chroot(".git")
+	storage := gogitfs.NewStorage(dotGitFs, cache.NewObjectLRUDefault())
+
+	if err == nil {
+		// Repo exists! Open it instead of Init
+		repo, err := git.Open(storage, a.fs)
 		if err != nil {
-			return fmt.Errorf("failed to open repository: %w", err)
+			return fmt.Errorf("failed to open existing repo: %w", err)
 		}
 		a.repo = repo
 		return nil
+	}
 
-	} else if err != nil {
-		return fmt.Errorf("failed to initialize new repository: %w", err)
+	repo, err := git.Init(storage, a.fs)
+	if err != nil {
+		return fmt.Errorf("failed to init repo")
 	}
 
 	a.repo = repo
 
 	// create the events directory and an initial commit to ensure a master branch exists
-	err = a.setupInitialRepoStructure(repoPath)
+	// err = a.setupInitialRepoStructure(repoPath)
 	return err
 }
 
 func (a *apiImpl) Clone(repoUrl, repoPath string) error {
-	// check if the directory already exists and is non-empty
-	if _, err := os.Stat(repoPath); err == nil {
-		// if the directory exists, try to open it instead of cloning over it.
-		// if the user meant to re-clone, they should delete the directory first.
-		return a.Initialize(repoPath)
-	}
+	// // check if the directory already exists and is non-empty
+	// if _, err := os.Stat(repoPath); err == nil {
+	// 	// if the directory exists, try to open it instead of cloning over it.
+	// 	// if the user meant to re-clone, they should delete the directory first.
+	// 	return a.Initialize(repoPath)
+	// }
 
-	repo, err := git.PlainClone(repoPath, &git.CloneOptions{
-		URL:      repoUrl,
-		Progress: os.Stdout, // optional: for logging clone progress
-	})
-	if err != nil {
-		return fmt.Errorf("failed to clone repository from '%s': %w", repoUrl, err)
-	}
+	// repo, err := git.Clone(memory.NewStorage(), a.fs, &git.CloneOptions{
+	// 	URL:      repoUrl,
+	// 	Progress: os.Stdout, // optional: for logging clone progress
+	// })
+	// if err != nil {
+	// 	return fmt.Errorf("failed to clone repository from '%s': %w", repoUrl, err)
+	// }
 
-	a.repo = repo
+	// a.repo = repo
 	return nil
 }
 
-func (a *apiImpl) setupInitialRepoStructure(repoPath string) error {
-	err := os.Mkdir(path.Join(repoPath, EventsDirName), 0o755)
-	if err != nil {
-		return fmt.Errorf("failed to create folder '%s': %w", path.Join(repoPath, EventsDirName), err)
-	}
+// func (a *apiImpl) setupInitialRepoStructure(repoPath string) error {
+// 	err := os.Mkdir(path.Join(repoPath, EventsDirName), 0o755)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create folder '%s': %w", path.Join(repoPath, EventsDirName), err)
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
