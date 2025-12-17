@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path"
+	"reflect"
 	"testing"
 	"time"
 
@@ -20,11 +21,11 @@ func Test_AddEvent_CreatesJsonFile(t *testing.T) {
 	}
 
 	err = a.AddEvent(
-		&core.Event{
+		core.Event{
 			Id:    1,
 			Title: "Foo Event",
-			From:  time.Now().Unix(),
-			To:    time.Now().Add(2 * time.Hour).Unix(),
+			From:  time.Now().Unix() / 1000,
+			To:    time.Now().Add(2*time.Hour).Unix() / 1000,
 		},
 	)
 	if err != nil {
@@ -46,9 +47,40 @@ func Test_AddEvent_CreatesJsonFile(t *testing.T) {
 	}
 
 	if parsedEvent.Id != 1 {
-		t.Errorf("id is not the same as input: \nin: %d\n !=\nfile: %v", 1, parsedEvent.Id)
+		t.Errorf("id is not the same as input: \nin:   %d\n!=\nfile: %v", 1, parsedEvent.Id)
 	}
 	if parsedEvent.Title != "Foo Event" {
-		t.Errorf("id is not the same as input: \nin: %s\n !=\nfile: %s", "Foo Event", parsedEvent.Title)
+		t.Errorf("id is not the same as input: \nin:   %s\n!=\nfile: %s", "Foo Event", parsedEvent.Title)
+	}
+}
+
+func Test_AddEventAndGetEvent_Works(t *testing.T) {
+	a := core.NewApi()
+
+	tmpDir := t.TempDir()
+	err := a.Initialize(tmpDir)
+	if err != nil {
+		t.Errorf("failed to init repo: %v", err)
+	}
+
+	eventIn := core.Event{
+		Id:    1,
+		Title: "Foo Event",
+		From:  time.Now().Unix() / 1000,
+		To:    time.Now().Add(2*time.Hour).Unix() / 1000,
+	}
+
+	err = a.AddEvent(eventIn)
+	if err != nil {
+		t.Errorf("failed to create an event: %v", err)
+	}
+
+	e, err := a.GetEvent(1)
+	if err != nil {
+		t.Errorf("failed to get an event by id: %v", err)
+	}
+
+	if !reflect.DeepEqual(eventIn, *e) {
+		t.Errorf("events are not the same: \nin:  %+v\n!=\nout: %+v", eventIn, *e)
 	}
 }

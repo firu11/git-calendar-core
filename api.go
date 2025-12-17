@@ -22,14 +22,16 @@ type (
 		Clone(repoUrl, repoPath string) error
 		// AddRemote()
 
-		AddEvent(*Event) error // TODO: check that it gets translated to a throwing exception for Kotlin/JS
-		UpdateEvent(*Event) error
-		RemoveEvent(*Event) error
-		GetEvents(from int64, to int64) ([]Event, error)
+		AddEvent(Event) error // TODO: check that it gets translated to a throwing exception for Kotlin/JS
+		UpdateEvent(Event) error
+		RemoveEvent(Event) error
+		GetEvent(id int) (*Event, error)
+		GetEvents(from int64, to int64) ([]*Event, error)
 	}
 
 	apiImpl struct {
-		eventTree *interval.SearchTree[*Event, int64]
+		eventTree *interval.SearchTree[int, int64] // int: id; int64: timestamp end and start
+		events    map[int]*Event
 		repoPath  string
 		repo      *git.Repository
 	}
@@ -37,17 +39,21 @@ type (
 
 func NewApi() Api {
 	var api apiImpl
-	api.eventTree = interval.NewSearchTree[*Event](func(x, y int64) int { return int(x - y) })
+	api.eventTree = interval.NewSearchTree[int](func(x, y int64) int { return int(x - y) })
+	api.events = make(map[int]*Event)
 	return &api
 }
 
-func (a *apiImpl) AddEvent(e *Event) error {
+func (a *apiImpl) AddEvent(e Event) error {
 	if err := e.Validate(); err != nil {
 		return fmt.Errorf("invalid event data: %w", err)
 	}
 
+	// add to all events
+	a.events[e.Id] = &e
+
 	// -------- insert into tree --------
-	err := a.eventTree.Insert(e.From, e.To, e)
+	err := a.eventTree.Insert(e.From, e.To, e.Id)
 	if err != nil {
 		return fmt.Errorf("failed to insert into index tree: %w", err)
 	}
@@ -62,6 +68,10 @@ func (a *apiImpl) AddEvent(e *Event) error {
 	filePath := filepath.Join(a.repoPath, EventsDirName, filename)
 	if err := os.WriteFile(filePath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write event file: %w", err)
+	}
+
+	if a.repo == nil {
+		return fmt.Errorf("repo not initialized")
 	}
 
 	// -------- add to git repo --------
@@ -94,19 +104,36 @@ func (a *apiImpl) AddEvent(e *Event) error {
 	return err
 }
 
-func (a *apiImpl) UpdateEvent(e *Event) error {
+func (a *apiImpl) UpdateEvent(e Event) error {
 	if err := e.Validate(); err != nil {
 		return fmt.Errorf("invalid event data: %w", err)
 	}
 
+	// check if it exists
+	_, ok := a.events[e.Id]
+	if !ok {
+		return fmt.Errorf("event with this id doesnt exist")
+	}
+
+	// replace the pointer
+	a.events[e.Id] = &e
+
 	return nil
 }
 
-func (a *apiImpl) RemoveEvent(e *Event) error {
+func (a *apiImpl) RemoveEvent(e Event) error {
 	return nil
 }
 
-func (a *apiImpl) GetEvents(from int64, to int64) ([]Event, error) {
+func (a *apiImpl) GetEvent(id int) (*Event, error) {
+	e, ok := a.events[id]
+	if !ok {
+		return nil, fmt.Errorf("event with this id doesnt exist")
+	}
+	return e, nil
+}
+
+func (a *apiImpl) GetEvents(from int64, to int64) ([]*Event, error) {
 	return nil, nil
 }
 
