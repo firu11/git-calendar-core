@@ -17,16 +17,17 @@ type (
 	// The exposed API interface
 	//
 	// cannot expose channels, maps or some goofy types which do not have bindings to other languages
+	// As even an array does not work, Ive decided to use json everywhere instead of Event, even though you can return a *Event from a function. You cannot pass it as argument, return a array of events or anything else. Using json everywhere as a rest api would...
 	Api interface {
 		Initialize(repoPath string) error
 		Clone(repoUrl, repoPath string) error
 		// AddRemote()
 
-		AddEvent(Event) error // TODO: check that it gets translated to a throwing exception for Kotlin/JS
-		UpdateEvent(Event) error
-		RemoveEvent(Event) error
-		GetEvent(id int) (*Event, error)
-		GetEvents(from int64, to int64) ([]*Event, error)
+		AddEvent(eventJson string) error // TODO: check that it gets translated to a throwing exception for Kotlin/JS
+		UpdateEvent(eventJson string) error
+		RemoveEvent(eventJson string) error
+		GetEvent(id int) (string, error)
+		GetEvents(from int64, to int64) (string, error)
 	}
 
 	apiImpl struct {
@@ -44,7 +45,10 @@ func NewApi() Api {
 	return &api
 }
 
-func (a *apiImpl) AddEvent(e Event) error {
+func (a *apiImpl) AddEvent(eventJson string) error {
+	var e Event
+	err := json.Unmarshal([]byte(eventJson), &e)
+
 	if err := e.Validate(); err != nil {
 		return fmt.Errorf("invalid event data: %w", err)
 	}
@@ -53,7 +57,7 @@ func (a *apiImpl) AddEvent(e Event) error {
 	a.events[e.Id] = &e
 
 	// -------- insert into tree --------
-	err := a.eventTree.Insert(e.From, e.To, e.Id)
+	err = a.eventTree.Insert(e.From, e.To, e.Id)
 	if err != nil {
 		return fmt.Errorf("failed to insert into index tree: %w", err)
 	}
@@ -104,7 +108,13 @@ func (a *apiImpl) AddEvent(e Event) error {
 	return err
 }
 
-func (a *apiImpl) UpdateEvent(e Event) error {
+func (a *apiImpl) UpdateEvent(eventJson string) error {
+	var e Event
+	err := json.Unmarshal([]byte(eventJson), &e)
+	if err != nil {
+		return fmt.Errorf("failed to parse event json: %w", err)
+	}
+
 	if err := e.Validate(); err != nil {
 		return fmt.Errorf("invalid event data: %w", err)
 	}
@@ -121,20 +131,26 @@ func (a *apiImpl) UpdateEvent(e Event) error {
 	return nil
 }
 
-func (a *apiImpl) RemoveEvent(e Event) error {
+func (a *apiImpl) RemoveEvent(eventJson string) error {
 	return nil
 }
 
-func (a *apiImpl) GetEvent(id int) (*Event, error) {
+func (a *apiImpl) GetEvent(id int) (string, error) {
 	e, ok := a.events[id]
 	if !ok {
-		return nil, fmt.Errorf("event with this id doesnt exist")
+		return "", fmt.Errorf("event with this id doesnt exist")
 	}
-	return e, nil
+
+	jsonBytes, err := json.Marshal(e)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	return string(jsonBytes), nil
 }
 
-func (a *apiImpl) GetEvents(from int64, to int64) ([]*Event, error) {
-	return nil, nil
+func (a *apiImpl) GetEvents(from int64, to int64) (string, error) {
+	return "", nil
 }
 
 func (a *apiImpl) Initialize(repoPath string) error {

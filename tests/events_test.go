@@ -20,14 +20,19 @@ func Test_AddEvent_CreatesJsonFile(t *testing.T) {
 		t.Errorf("failed to init repo: %v", err)
 	}
 
-	err = a.AddEvent(
-		core.Event{
-			Id:    1,
-			Title: "Foo Event",
-			From:  time.Now().Unix() / 1000,
-			To:    time.Now().Add(2*time.Hour).Unix() / 1000,
-		},
-	)
+	eventIn := core.Event{
+		Id:    1,
+		Title: "Foo Event",
+		From:  time.Now().Unix() / 1000,
+		To:    time.Now().Add(2*time.Hour).Unix() / 1000,
+	}
+
+	eventInJson, err := json.Marshal(eventIn)
+	if err != nil {
+		t.Errorf("failed to marshal event: %v", err)
+	}
+
+	err = a.AddEvent(string(eventInJson))
 	if err != nil {
 		t.Errorf("failed to create an event: %v", err)
 	}
@@ -70,7 +75,12 @@ func Test_AddEventAndGetEvent_Works(t *testing.T) {
 		To:    time.Now().Add(2*time.Hour).Unix() / 1000,
 	}
 
-	err = a.AddEvent(eventIn)
+	eventInJson, err := json.Marshal(eventIn)
+	if err != nil {
+		t.Errorf("failed to marshal event: %v", err)
+	}
+
+	err = a.AddEvent(string(eventInJson))
 	if err != nil {
 		t.Errorf("failed to create an event: %v", err)
 	}
@@ -80,7 +90,13 @@ func Test_AddEventAndGetEvent_Works(t *testing.T) {
 		t.Errorf("failed to get an event by id: %v", err)
 	}
 
-	if !reflect.DeepEqual(eventIn, *e) {
-		t.Errorf("events are not the same: \nin:  %+v\n!=\nout: %+v", eventIn, *e)
+	var eventOut core.Event
+	err = json.Unmarshal([]byte(e), &eventOut)
+	if err != nil {
+		t.Errorf("failed to unmarshal event: %v", err)
+	}
+
+	if !reflect.DeepEqual(eventIn, eventOut) {
+		t.Errorf("events are not the same: \nin:  %+v\n!=\nout: %+v", eventIn, eventOut)
 	}
 }
