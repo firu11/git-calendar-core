@@ -29,7 +29,7 @@ type Event struct {
 	Calendar    string      `json:"calendar,omitzero"`  // The name of the calendar the event belongs to.
 	Tag         string      `json:"tag,omitzero"`       // User-defined category or label.
 	ParentId    uuid.UUID   `json:"parent_id,omitzero"` // Specific for child events. It is uuid.Nil if the event is basic or parent.
-	Repeat      *Repetition `json:"repeat,omitzero"`    // nil if child
+	Repeat      *Repetition `json:"repeat,omitzero"`
 }
 
 // Repetition defines the recurrence rules for a Parent event.

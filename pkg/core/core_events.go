@@ -277,7 +277,7 @@ func (c *Core) updateFollowingChildren(old, new *Event) (*Event, error) {
 	newEvent.Id = uuid.New()     // assign new id
 	newEvent.ParentId = uuid.Nil // not child anymore
 
-	if originalCount != 0 {
+	if originalCount != 0 && newEvent.Repeat != nil {
 		// shorten the repeat for the second half
 		_, elapsed := firstOccurrenceAtOrAfter(old.From, parent)
 		if elapsed <= 0 {
