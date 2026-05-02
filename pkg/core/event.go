@@ -39,7 +39,7 @@ type Event struct {
 type Repetition struct {
 	Frequency  Freq        `json:"frequency,omitzero"`  // The unit of time for recurrence (Day, Week, Month, etc.).
 	Interval   int         `json:"interval,omitzero"`   // The multiplier for Frequency (e.g., Interval:2 * Frequency:Week = every other week).
-	Until      time.Time   `json:"until,omitzero"`      // Hard stop date for the series.
+	Until      time.Time   `json:"until,omitzero"`      // Hard stop date for the series. (Inclusive: occurrences starting BEFORE or even ON this time are included.)
 	Count      int         `json:"count,omitzero"`      // Total number of occurrences to generate.
 	Exceptions []uuid.UUID `json:"exceptions,omitzero"` // List of Child IDs that deviate from the base rule (edited or cancelled).
 }

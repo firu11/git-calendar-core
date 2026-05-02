@@ -26,7 +26,7 @@ func addUnit(t time.Time, value int, unit Freq) time.Time {
 	}
 }
 
-// Returns the first start time >= searchStart (or zero time if none reasonable).
+// firstOccurrenceAtOrAfter returns the first start time >= searchStart (or zero time if none reasonable).
 // Also returns how many steps from the original (0 = original event time).
 func firstOccurrenceAtOrAfter(searchStart time.Time, ev *Event) (time.Time, int) {
 	if ev.Repeat == nil {
@@ -38,16 +38,14 @@ func firstOccurrenceAtOrAfter(searchStart time.Time, ev *Event) (time.Time, int)
 
 	current := ev.From
 	steps := 0
-	interval := max(1, ev.Repeat.Interval) // prevent crazy input
-
-	const maxSteps = 36500 // safety limit (~100 years)
+	const maxSteps = 36500 // safety limit (~100 years for freq=Daily)
 
 	for current.Before(searchStart) && steps < maxSteps {
-		current = addUnit(current, interval, ev.Repeat.Frequency)
+		current = addUnit(current, ev.Repeat.Interval, ev.Repeat.Frequency)
 		steps++
 	}
 
-	if steps >= maxSteps || current.IsZero() {
+	if current.IsZero() || steps >= maxSteps {
 		return time.Time{}, -1
 	}
 
@@ -67,7 +65,7 @@ func containsTime(exceptions []uuid.UUID, t time.Time) bool {
 	return false
 }
 
-// Extracts the auth (http://USER:PASS@example.com/...) from repoUrl and returns a new url using proxyUrl if present.
+// prepareRepoUrl extracts the auth (http://USER:PASS@example.com/...) from repoUrl and returns a new url using proxyUrl if present.
 func prepareRepoUrl(repoUrl url.URL, proxyUrl *url.URL) (url.URL, *http.BasicAuth) {
 	// parse auth from url and delete the credentials
 	auth := authFromUrl(repoUrl)
@@ -81,7 +79,7 @@ func prepareRepoUrl(repoUrl url.URL, proxyUrl *url.URL) (url.URL, *http.BasicAut
 	return repoUrl, auth
 }
 
-// Merges the originalUrl with proxyUrl to use the cors proxy. Using the "url" query parameter.
+// useCorsProxy merges the originalUrl with proxyUrl to use the cors proxy. Using the "url" query parameter.
 //
 // For Example:
 //
@@ -100,7 +98,7 @@ func useCorsProxy(originalUrl url.URL, proxyUrl url.URL) url.URL {
 	return result
 }
 
-// Extracts BasicAuth credentials from an URL.
+// authFromUrl extracts BasicAuth credentials from an URL.
 func authFromUrl(u url.URL) *http.BasicAuth {
 	credentials := u.User
 	pass, ok := credentials.Password()
@@ -114,7 +112,7 @@ func authFromUrl(u url.URL) *http.BasicAuth {
 	}
 }
 
-// Turns "http://abc.com/foo/bar/my-calendar.git" into "my-calendar".
+// calendarNameFromUrl turns "http://abc.com/foo/bar/my-calendar.git" into "my-calendar".
 func calendarNameFromUrl(u url.URL) string {
 	name := path.Base(u.Path)
 	if name == "." || name == "/" {
@@ -123,7 +121,7 @@ func calendarNameFromUrl(u url.URL) string {
 	return strings.TrimSuffix(name, ".git")
 }
 
-// Generates custom uuid from parentId and some time. It uses 6 bytes for the parent and 6 bytes for the time.
+// generateCustomUUID generates custom uuid from parentId and some time. It uses 6 bytes for the parent and 6 bytes for the time.
 // If the generation fails, it returns uuid.New().
 func generateCustomUUID(parentId uuid.UUID, t time.Time) uuid.UUID {
 	idBuf := make([]byte, 16)
@@ -141,10 +139,9 @@ func generateCustomUUID(parentId uuid.UUID, t time.Time) uuid.UUID {
 	return id
 }
 
-// extracts time from custom UUIDv8
+// getTimeFromUUID extracts time from custom UUIDv8.
 func getTimeFromUUID(id uuid.UUID) time.Time {
-	// check if the id is v8
-	if id[6] != 0x80 {
+	if id.Version() != 8 {
 		return time.Time{}
 	}
 	unix32 := binary.BigEndian.Uint32(id[12:16])
@@ -152,10 +149,9 @@ func getTimeFromUUID(id uuid.UUID) time.Time {
 }
 
 // getShiftedUUID returns a copy of a UUIDv8 with its custom 32-bit timestamp (stored in bytes 12–15, big-endian) shifted by the given duration.
-// Returns uuid.Nil if the input is not version 8 or is invalid.
+// Returns uuid.Nil if the input id is not v8.
 func getShiftedUUID(id uuid.UUID, duration time.Duration) uuid.UUID {
-	// version Check (Byte 6, high 4 bits)
-	if (id[6] >> 4) != 8 {
+	if id.Version() != 8 {
 		return uuid.Nil
 	}
 
@@ -171,4 +167,16 @@ func getShiftedUUID(id uuid.UUID, duration time.Duration) uuid.UUID {
 	binary.BigEndian.PutUint32(newId[12:16], shiftedTime)
 
 	return newId
+}
+
+// splitExceptions returns two exceptions groups. One with exceptions before and one with exceptions after the specified cutoff.
+func splitExceptions(exceptions []uuid.UUID, cutoff time.Time) (before, after []uuid.UUID) {
+	for _, ex := range exceptions {
+		if getTimeFromUUID(ex).Before(cutoff) {
+			before = append(before, ex)
+		} else {
+			after = append(after, ex)
+		}
+	}
+	return
 }

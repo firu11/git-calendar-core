@@ -97,7 +97,7 @@ func (c *Core) UpdateRepeatingEvent(old, new Event, strat UpdateStrategy) (*Even
 	case Current:
 		return c.updateCurrentChild(&new)
 	case Following:
-		return c.updateFollowingChildren(&new)
+		return c.updateFollowingChildren(&old, &new)
 	case All:
 		return c.updateAllChildren(&old, &new)
 	default:
@@ -186,10 +186,6 @@ func (c *Core) GetEvents(from, to time.Time) []Event {
 			}
 
 			for firstStart.Before(to) { // while child event fits in the wanted interval
-				if firstStart.Add(eventDuration).Before(from) { // if the child event ends before our wanted interval -> skip
-					firstStart = addUnit(firstStart, curEvent.Repeat.Interval, curEvent.Repeat.Frequency) // next occurrence
-					continue
-				}
 				// logic when repeating until
 				if curEvent.Repeat.Count == 0 && firstStart.After(curEvent.Repeat.Until) {
 					break // new event exceeded the repetition end (Until)
@@ -254,8 +250,8 @@ func (c *Core) updateCurrentChild(updated *Event) (*Event, error) {
 }
 
 // Splits the time series into two by stopping the original parent event from repeating further and creating brand new parent with updated properties.
-func (c *Core) updateFollowingChildren(event *Event) (*Event, error) {
-	parent, ok := c.events[event.ParentId]
+func (c *Core) updateFollowingChildren(old, new *Event) (*Event, error) {
+	parent, ok := c.events[new.ParentId]
 	if !ok || parent == nil || !parent.IsParent() {
 		return nil, fmt.Errorf("no valid parent found")
 	}
@@ -263,30 +259,46 @@ func (c *Core) updateFollowingChildren(event *Event) (*Event, error) {
 	// save originals for rollback
 	originalUntil := parent.Repeat.Until
 	originalCount := parent.Repeat.Count
+	originalExceptions := append([]uuid.UUID{}, parent.Repeat.Exceptions...) // deep copy
 
-	parent.Repeat.Until = event.From // cap parent at start of change
-	parent.Repeat.Count = 0          // enforce Until logic over Count
+	parent.Repeat.Until = addUnit(old.From, -1, old.Repeat.Frequency) // cap parent at start of change
+	parent.Repeat.Count = 0                                           // enforce Until logic over Count
+
+	// split exceptions
+	exBefore, exAfter := splitExceptions(parent.Repeat.Exceptions, new.From)
+	parent.Repeat.Exceptions = exBefore
 
 	if err := c.saveAndCommitEvent(parent, fmt.Sprintf("Capped parent event '%s'", parent.Id)); err != nil {
 		return nil, fmt.Errorf("failed to commit parent event: %w", err)
 	}
 
 	// create the new parent for the second half of the time series
-	newEvent := *event           // shallow copy
-	newEvent.Id = uuid.Nil       // set to nil; CreateEvent will asign a new one
+	newEvent := *new             // shallow copy
+	newEvent.Id = uuid.New()     // assign new id
 	newEvent.ParentId = uuid.Nil // not child anymore
 
-	if newEvent.Repeat.Count != 0 {
+	if originalCount != 0 {
 		// shorten the repeat for the second half
-		_, elapsed := firstOccurrenceAtOrAfter(event.From, parent)
+		_, elapsed := firstOccurrenceAtOrAfter(old.From, parent)
 		if elapsed <= 0 {
-			// Split is at or before the parent's first occurrence - nothing to subtract.
+			// the split is at the first occurance -> nothing to subtract (basically update all)
 			newEvent.Repeat.Count = originalCount
 		} else {
-			newEvent.Repeat.Count = originalCount - elapsed
-			if newEvent.Repeat.Count <= 0 {
-				newEvent.Repeat.Count = 1
+			remaining := originalCount - elapsed
+			if remaining <= 0 {
+				remaining = 1
 			}
+			newEvent.Repeat.Count = remaining
+		}
+	}
+
+	// transform exceptions
+	fromDiff := newEvent.From.Sub(old.From)
+	if fromDiff != 0 {
+		for _, exc := range exAfter {
+			t := getTimeFromUUID(exc)
+			t = t.Add(fromDiff)
+			newEvent.Repeat.Exceptions = append(newEvent.Repeat.Exceptions, generateCustomUUID(newEvent.Id, t))
 		}
 	}
 
@@ -295,13 +307,12 @@ func (c *Core) updateFollowingChildren(event *Event) (*Event, error) {
 		// rollback the parent cap
 		parent.Repeat.Until = originalUntil
 		parent.Repeat.Count = originalCount
+		parent.Repeat.Exceptions = originalExceptions
 		if rbErr := c.saveAndCommitEvent(parent, fmt.Sprintf("Rolled back cap on parent event '%s'", parent.Id)); rbErr != nil {
 			return nil, fmt.Errorf("failed to create new event: %w; rollback also failed: %v", err, rbErr)
 		}
 		return nil, fmt.Errorf("failed to create new event: %w", err)
 	}
-
-	// TODO: update series with exceptions does not work as intended...
 
 	return createdEvent, nil
 }
@@ -313,20 +324,23 @@ func (c *Core) updateAllChildren(old, new *Event) (*Event, error) {
 		return nil, fmt.Errorf("updateRepeatingAll works with child events")
 	}
 
-	parent, ok := c.events[new.ParentId]
+	parent, ok := c.events[old.ParentId]
 	if !ok || parent == nil || !parent.IsParent() {
 		return nil, fmt.Errorf("no valid parent found")
 	}
 
 	fromDiff := new.From.Sub(old.From)
 	toDiff := new.To.Sub(old.To)
-	toChanged := toDiff != 0
+
 	fromChanged := fromDiff != 0
+	toChanged := toDiff != 0
 	repeatChanged := !reflect.DeepEqual(old.Repeat, new.Repeat)
 
-	if fromChanged || toChanged || repeatChanged {
+	needsReindex := fromChanged || toChanged || repeatChanged
+
+	if needsReindex {
 		if err := c.intervalTree.RemoveEvent(*parent); err != nil {
-			return nil, fmt.Errorf("failed to remove the parent from interval tree: %w", err)
+			return nil, fmt.Errorf("failed to remove parent from interval tree: %w", err)
 		}
 	}
 
@@ -349,19 +363,19 @@ func (c *Core) updateAllChildren(old, new *Event) (*Event, error) {
 	parent.Tag = new.Tag
 	parent.Calendar = new.Calendar
 
-	c.events[parent.Id] = parent
-
-	if fromChanged || toChanged || repeatChanged {
+	if needsReindex {
 		if err := c.intervalTree.InsertEvent(*parent); err != nil {
-			return nil, fmt.Errorf("failed to rebuild tree for updated: %w", err)
+			return nil, fmt.Errorf("failed to reinsert parent: %w", err)
 		}
 	}
 
-	if err := c.saveAndCommitEvent(parent, fmt.Sprintf("Updated time series (parent '%s')", parent.Id)); err != nil {
-		return nil, fmt.Errorf("failed to save updated to repo: %w", err)
+	if err := c.saveAndCommitEvent(parent,
+		fmt.Sprintf("Updated time series (parent '%s')", parent.Id),
+	); err != nil {
+		return nil, fmt.Errorf("failed to save parent: %w", err)
 	}
 
-	return new, nil
+	return parent, nil
 }
 
 func (c *Core) removeCurrentChild(event *Event) error {

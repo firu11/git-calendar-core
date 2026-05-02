@@ -256,65 +256,33 @@ func TestCalendarNameFromUrl(t *testing.T) {
 	}
 }
 
-func TestGenerateCustomUUID(t *testing.T) {
-	type args struct {
+func TestCustomUUIDs(t *testing.T) {
+	type args struct{}
+	tests := []struct {
+		name     string
 		parentId uuid.UUID
 		t        time.Time
-	}
-	tests := []struct {
-		name string
-		args args
-		want uuid.UUID
+		shift    time.Duration
 	}{
-		// TODO: Add test cases.
+		{
+			name:     "basic",
+			parentId: uuid.New(), // UUIDv4
+			t:        time.Now().Round(time.Second),
+			shift:    time.Hour,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := generateCustomUUID(tt.args.parentId, tt.args.t); !cmp.Equal(tt.want, got) {
-				t.Errorf("generateCustomUUID() = %v, want %v\ndiff=%s", got, tt.want, cmp.Diff(tt.want, got))
+			gotId := generateCustomUUID(tt.parentId, tt.t)
+			gotTime := getTimeFromUUID(gotId)
+			if !cmp.Equal(tt.t, gotTime) {
+				t.Errorf("getTimeFromUUID() = %v, want %v", gotTime, tt.t)
 			}
-		})
-	}
-}
 
-func TestGetTimeFromUUID(t *testing.T) {
-	type args struct {
-		id uuid.UUID
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    time.Time
-		wantErr bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getTimeFromUUID(tt.args.id)
-			if !cmp.Equal(tt.want, got) {
-				t.Errorf("getTimeFromUUID() = %v, want %v\ndiff=%s", got, tt.want, cmp.Diff(tt.want, got))
-			}
-		})
-	}
-}
-
-func TestGetShiftedUUID(t *testing.T) {
-	type args struct {
-		id       uuid.UUID
-		duration time.Duration
-	}
-	tests := []struct {
-		name string
-		args args
-		want uuid.UUID
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := getShiftedUUID(tt.args.id, tt.args.duration); !cmp.Equal(tt.want, got) {
-				t.Errorf("getShiftedUUID() = %v, want %v\ndiff=%s", got, tt.want, cmp.Diff(tt.want, got))
+			shiftedId := getShiftedUUID(gotId, tt.shift)
+			gotShiftedTime := getTimeFromUUID(shiftedId)
+			if !cmp.Equal(tt.t.Add(tt.shift), gotShiftedTime) {
+				t.Errorf("getTimeFromUUID() = %v, want %v", gotShiftedTime, tt.t.Add(tt.shift))
 			}
 		})
 	}

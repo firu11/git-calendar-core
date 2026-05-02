@@ -240,7 +240,7 @@ func TestUpdateRepeatingEvent_Following(t *testing.T) {
 	eventsOut := c.GetEvents(startTime, startTime.AddDate(0, 0, 21))
 	targetEvent := eventsOut[2]
 	updatedTarget := targetEvent
-	originalFrom := targetEvent.From
+	expectedUntilCap := eventsOut[1].From
 
 	updatedTarget.Title = "Weekly Meeting - New Phase"
 	updatedTarget.Repeat = &core.Repetition{
@@ -263,8 +263,8 @@ func TestUpdateRepeatingEvent_Following(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get parent out: %v", err)
 	}
-	if !olderParentOut.Repeat.Until.Equal(originalFrom) {
-		t.Errorf("parent event Until was not capped correctly. Expected %s, got %s", originalFrom, olderParentOut.Repeat.Until)
+	if !olderParentOut.Repeat.Until.Equal(expectedUntilCap) {
+		t.Errorf("parent event Until was not capped correctly. Expected %s, got %s", expectedUntilCap, olderParentOut.Repeat.Until)
 	}
 	if olderParentOut.Repeat.Count != 0 {
 		t.Errorf("parent event Count should be overridden to 0, got %d", olderParentOut.Repeat.Count)
@@ -362,5 +362,79 @@ func TestUpdateEvent_FromStandardToRepeating(t *testing.T) {
 	}
 	if updatedParent.Repeat == nil || updatedParent.Repeat.Count != 3 {
 		t.Errorf("parent event was not correctly updated to be repeating")
+	}
+}
+
+func TestUpdateFollowing_ExceptionCarriedToNewParent(t *testing.T) {
+	c := core.NewCore()
+	_ = c.CreateCalendar(TestCalendarName, "")
+
+	const count = 5
+	startTime := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	parentEvent := core.Event{
+		Id:       uuid.New(),
+		Calendar: TestCalendarName,
+		Title:    "Daily Standup",
+		From:     startTime,
+		To:       startTime.Add(time.Hour),
+		Repeat: &core.Repetition{
+			Frequency: core.Day,
+			Interval:  1,
+			Count:     count,
+		},
+	}
+	_, err := c.CreateEvent(parentEvent)
+	if err != nil {
+		t.Fatalf("failed to create event: %v", err)
+	}
+
+	allEvents := c.GetEvents(startTime, startTime.AddDate(0, 0, count+5))
+	if len(allEvents) != count {
+		t.Fatalf("setup: expected %d events, got %d", count, len(allEvents))
+	}
+
+	// delete the 4th child - creates an exception on the parent
+	if err := c.RemoveRepeatingEvent(allEvents[3], core.Current); err != nil {
+		t.Fatalf("failed to remove 4th event: %v", err)
+	}
+
+	// update the 2nd child (and all following) by shifting it 1h
+	const shift = time.Hour
+	secondEvent := allEvents[1]
+	updatedSecond := secondEvent
+	updatedSecond.From = secondEvent.From.Add(shift)
+	updatedSecond.To = secondEvent.To.Add(shift)
+	updatedSecond.Repeat = &core.Repetition{
+		Frequency: core.Day,
+		Interval:  1,
+		Count:     count,
+	}
+
+	_, err = c.UpdateRepeatingEvent(secondEvent, updatedSecond, core.Following)
+	if err != nil {
+		t.Fatalf("failed to Following-update second event: %v", err)
+	}
+
+	result := c.GetEvents(startTime, startTime.AddDate(0, 0, count+5))
+	if len(result) != count-1 {
+		t.Fatalf("expected %d events after delete+split, got %d: %+v", count-1, len(result), result)
+	}
+
+	type expected struct {
+		from time.Time
+		desc string
+	}
+	wants := []expected{
+		{startTime, "day 0 unshifted (original parent, capped exclusively)"},
+		{startTime.AddDate(0, 0, 1).Add(shift), "day 1 shifted"},
+		{startTime.AddDate(0, 0, 2).Add(shift), "day 2 shifted"},
+		// day 3 gap - exception should carry and time-adjust
+		{startTime.AddDate(0, 0, 4).Add(shift), "day 4 shifted"},
+	}
+
+	for i, w := range wants {
+		if !result[i].From.Equal(w.from) {
+			t.Errorf("result[%d] (%s): expected From %s, got %s", i, w.desc, w.from, result[i].From)
+		}
 	}
 }
