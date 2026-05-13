@@ -49,21 +49,26 @@ func (c *Core) SetCorsProxy(proxyUrl string) error {
 	return err
 }
 
-// Update all repotes for all repositories.
+// Update all remotes for all repositories.
 func (c *Core) PushAll() error {
-	// TODO idk if it works
-
-	var err error
+	var errs error
 	for _, cal := range c.calendars {
-		errx := cal.Repository.Push(&gogit.PushOptions{})
-		if errx == gogit.NoErrAlreadyUpToDate {
-			continue // this is ok
+		remotes, err := cal.Repository.Remotes()
+		if err != nil {
+			errs = errors.Join(err)
 		}
-		if errx != nil {
-			err = errors.Join(errx)
+
+		for _, remote := range remotes {
+			err = remote.Push(&gogit.PushOptions{})
+			if err == gogit.NoErrAlreadyUpToDate {
+				continue // this is ok
+			}
+			if err != nil {
+				errs = errors.Join(err)
+			}
 		}
 	}
-	return err
+	return errs
 }
 
 // Update all repositories from remotes.

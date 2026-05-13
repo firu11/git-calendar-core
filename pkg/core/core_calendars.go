@@ -176,10 +176,6 @@ func (c *Core) CloneCalendar(repoUrl *url.URL, password string) error {
 		return fmt.Errorf("git clone failed: %w", err)
 	}
 
-	// repair the remote url (set the pure url with auth, without proxy)
-	err = newRepo.DeleteRemote("origin")
-	c.AddRemote(calendarName, "origin", repoUrl.String())
-
 	var key []byte = nil
 	if len(password) != 0 {
 		key = encryption.DeriveKey(password, []byte(calendarName))
@@ -200,7 +196,17 @@ func (c *Core) CloneCalendar(repoUrl *url.URL, password string) error {
 		EncryptionKey: key,
 	}
 
-	return err
+	// repair the remote url (set the pure url with auth, without proxy)
+	err = newRepo.DeleteRemote("origin")
+	if err != nil {
+		return err
+	}
+	err = c.AddRemote(calendarName, "origin", repoUrl.String())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Removes and deletes the whole calendar.
@@ -239,7 +245,12 @@ func (c *Core) AddRemote(calendar, remoteName, remoteUrl string) error {
 		validUrl = parsedUrl.String()
 	}
 
-	_, err := c.calendars[calendar].Repository.CreateRemote(&config.RemoteConfig{
+	cal, ok := c.calendars[calendar]
+	if !ok {
+		return fmt.Errorf("calendar not found: %s", calendar)
+	}
+
+	_, err := cal.Repository.CreateRemote(&config.RemoteConfig{
 		Name: remoteName,
 		URLs: []string{validUrl},
 	})
