@@ -66,40 +66,56 @@ func containsTime(exceptions []uuid.UUID, t time.Time) bool {
 }
 
 // prepareRepoUrl extracts the auth (http://USER:PASS@example.com/...) from repoUrl and returns a new url using proxyUrl if present.
-func prepareRepoUrl(repoUrl url.URL, proxyUrl *url.URL) (url.URL, *http.BasicAuth) {
+func prepareRepoUrl(repoUrl *url.URL, proxyUrl *url.URL) (*url.URL, *http.BasicAuth) {
+	if repoUrl == nil {
+		return nil, nil
+	}
+	repo := *repoUrl // copy
+
 	// parse auth from url and delete the credentials
-	auth := authFromUrl(repoUrl)
-	repoUrl.User = nil
+	auth := authFromUrl(&repo)
+	repo.User = nil
 
 	// add proxy if specified
 	if proxyUrl != nil {
-		repoUrl = useCorsProxy(repoUrl, *proxyUrl)
+		return useCorsProxy(&repo, proxyUrl), auth
 	}
 
-	return repoUrl, auth
+	return &repo, auth
 }
 
-// useCorsProxy merges the originalUrl with proxyUrl to use the cors proxy. Using the "url" query parameter.
-//
-// For Example:
-//
-//	originalUrl: "https://github.com/joe/my-calendar"
-//	proxyUrl: "https://cors-proxy.abc"
-//	out: "https://cors-proxy.abc/?url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"
-func useCorsProxy(originalUrl url.URL, proxyUrl url.URL) url.URL {
-	// create the query parameter
-	q := proxyUrl.Query()
-	q.Set("url", originalUrl.String())
+// useCorsProxy returns a new URL that routes the original URL through the given CORS proxy.
+// The full original URL (including scheme) is appended as the path to the proxy.
+func useCorsProxy(original, proxy *url.URL) *url.URL {
+	if proxy == nil {
+		return original
+	}
+	if original == nil {
+		u := *proxy
+		return &u
+	}
 
-	// create the result with query param (e.g. https://cors-proxy.abc/?url=https://github.com/...)
-	result := proxyUrl
-	result.RawQuery = q.Encode()
+	p := *proxy // copy
+
+	// cut trailing slash
+	base := strings.TrimRight(p.String(), "/")
+	if base == "" {
+		base = p.Scheme + "://" + p.Host
+	}
+	result, err := url.Parse(base + "/" + original.String())
+	if err != nil {
+		return nil
+	}
 
 	return result
 }
 
 // authFromUrl extracts BasicAuth credentials from an URL.
-func authFromUrl(u url.URL) *http.BasicAuth {
+func authFromUrl(u *url.URL) *http.BasicAuth {
+	if u == nil {
+		return nil
+	}
+
 	credentials := u.User
 	pass, ok := credentials.Password()
 	if !ok && credentials.Username() == "" {
@@ -113,7 +129,11 @@ func authFromUrl(u url.URL) *http.BasicAuth {
 }
 
 // calendarNameFromUrl turns "http://abc.com/foo/bar/my-calendar.git" into "my-calendar".
-func calendarNameFromUrl(u url.URL) string {
+func calendarNameFromUrl(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+
 	name := path.Base(u.Path)
 	if name == "." || name == "/" {
 		return "shouldnthappen"

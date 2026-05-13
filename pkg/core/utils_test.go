@@ -84,9 +84,9 @@ func TestPrepareRepoUrl(t *testing.T) {
 	someProxyUrl := mustParseUrl("https://cors-proxy.abc")
 	tests := []struct {
 		name     string
-		repoUrl  url.URL
+		repoUrl  *url.URL
 		proxyUrl *url.URL
-		urlWant  url.URL
+		urlWant  *url.URL
 		authWant *http.BasicAuth
 	}{
 		{
@@ -99,22 +99,22 @@ func TestPrepareRepoUrl(t *testing.T) {
 		{
 			name:     "basic proxy and no auth",
 			repoUrl:  mustParseUrl("https://github.com/joe/my-calendar"),
-			proxyUrl: &someProxyUrl,
-			urlWant:  mustParseUrl("https://cors-proxy.abc?url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"),
+			proxyUrl: someProxyUrl,
+			urlWant:  mustParseUrl("https://cors-proxy.abc/https://github.com/joe/my-calendar"),
 			authWant: nil,
 		},
 		{
 			name:     "basic proxy and token",
 			repoUrl:  mustParseUrl("https://token_asdadad@github.com/joe/my-calendar"),
-			proxyUrl: &someProxyUrl,
-			urlWant:  mustParseUrl("https://cors-proxy.abc?url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"),
+			proxyUrl: someProxyUrl,
+			urlWant:  mustParseUrl("https://cors-proxy.abc/https://github.com/joe/my-calendar"),
 			authWant: &http.BasicAuth{Username: "token_asdadad", Password: ""},
 		},
 		{
 			name:     "basic proxy and username+pass",
 			repoUrl:  mustParseUrl("https://joe:1234@github.com/joe/my-calendar"),
-			proxyUrl: &someProxyUrl,
-			urlWant:  mustParseUrl("https://cors-proxy.abc?url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"),
+			proxyUrl: someProxyUrl,
+			urlWant:  mustParseUrl("https://cors-proxy.abc/https://github.com/joe/my-calendar"),
 			authWant: &http.BasicAuth{Username: "joe", Password: "1234"},
 		},
 	}
@@ -134,39 +134,33 @@ func TestPrepareRepoUrl(t *testing.T) {
 func TestUseCorsProxy(t *testing.T) {
 	tests := []struct {
 		name     string
-		original url.URL
-		proxy    url.URL
-		want     url.URL
+		original *url.URL
+		proxy    *url.URL
+		want     *url.URL
 	}{
 		{
 			name:     "basic proxy",
-			original: mustParseUrl("https://github.com/joe/my-calendar"),
-			proxy:    mustParseUrl("https://cors-proxy.abc"),
-			want:     mustParseUrl("https://cors-proxy.abc?url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"),
+			original: mustParseUrl("https://github.com/joe/my-calendar.git"),
+			proxy:    mustParseUrl("http://cors-proxy.abc"),
+			want:     mustParseUrl("http://cors-proxy.abc/https://github.com/joe/my-calendar.git"),
 		},
 		{
 			name:     "basic proxy with trailing slash",
-			original: mustParseUrl("https://github.com/joe/my-calendar"),
-			proxy:    mustParseUrl("https://cors-proxy.abc/"),
-			want:     mustParseUrl("https://cors-proxy.abc/?url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"),
-		},
-		{
-			name:     "proxy with another query param",
-			original: mustParseUrl("https://github.com/joe/my-calendar"),
-			proxy:    mustParseUrl("https://cors-proxy.abc?token=ABC123"),
-			want:     mustParseUrl("https://cors-proxy.abc?token=ABC123&url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"),
-		},
-		{
-			name:     "proxy with another query param and trailing slash",
-			original: mustParseUrl("https://github.com/joe/my-calendar"),
-			proxy:    mustParseUrl("https://cors-proxy.abc/?token=ABC123"),
-			want:     mustParseUrl("https://cors-proxy.abc/?token=ABC123&url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar"),
+			original: mustParseUrl("https://github.com/joe/my-calendar.git"),
+			proxy:    mustParseUrl("http://cors-proxy.abc/"),
+			want:     mustParseUrl("http://cors-proxy.abc/https://github.com/joe/my-calendar.git"),
 		},
 		{
 			name:     "query param in original url",
-			original: mustParseUrl("https://github.com/joe/my-calendar?token=ABC123"),
-			proxy:    mustParseUrl("https://cors-proxy.abc"),
-			want:     mustParseUrl("https://cors-proxy.abc?url=https%3A%2F%2Fgithub.com%2Fjoe%2Fmy-calendar%3Ftoken%3DABC123"),
+			original: mustParseUrl("https://github.com/joe/my-calendar.git?token=ABC123"),
+			proxy:    mustParseUrl("http://cors-proxy.abc"),
+			want:     mustParseUrl("http://cors-proxy.abc/https://github.com/joe/my-calendar.git?token=ABC123"),
+		},
+		{
+			name:     "proxy with path",
+			original: mustParseUrl("https://github.com/joe/my-calendar.git"),
+			proxy:    mustParseUrl("http://cors-proxy.abc/foo"),
+			want:     mustParseUrl("http://cors-proxy.abc/foo/https://github.com/joe/my-calendar.git"),
 		},
 	}
 
@@ -182,7 +176,7 @@ func TestUseCorsProxy(t *testing.T) {
 func TestAuthFromUrl(t *testing.T) {
 	tests := []struct {
 		name string
-		url  url.URL
+		url  *url.URL
 		want *http.BasicAuth
 	}{
 		{
@@ -213,7 +207,7 @@ func TestAuthFromUrl(t *testing.T) {
 func TestCalendarNameFromUrl(t *testing.T) {
 	tests := []struct {
 		name string
-		url  url.URL
+		url  *url.URL
 		want string
 	}{
 		{
@@ -289,10 +283,10 @@ func TestCustomUUIDs(t *testing.T) {
 }
 
 // Helper
-func mustParseUrl(raw string) url.URL {
+func mustParseUrl(raw string) *url.URL {
 	u, err := url.Parse(raw)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse url: %v", err))
 	}
-	return *u
+	return u
 }

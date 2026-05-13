@@ -139,7 +139,7 @@ func (c *Core) LoadCalendars() error {
 }
 
 // Clones a repository/calendar from url, using CORS proxy, if specified.
-func (c *Core) CloneCalendar(repoUrl url.URL, password string) error {
+func (c *Core) CloneCalendar(repoUrl *url.URL, password string) error {
 	calendarName := calendarNameFromUrl(repoUrl)
 	if cal, ok := c.calendars[calendarName]; ok || cal != nil {
 		return errors.New("calendar with this name already exists")

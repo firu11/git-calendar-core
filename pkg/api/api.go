@@ -53,7 +53,7 @@ func (a *Api) CloneCalendar(repoUrl, password string) error {
 	if err != nil {
 		return fmt.Errorf("repoUrl is invalid: %w", err)
 	}
-	return a.inner.CloneCalendar(*parsedUrl, password)
+	return a.inner.CloneCalendar(parsedUrl, password)
 }
 
 func (a *Api) ListCalendars() (string, error) {
