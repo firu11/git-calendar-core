@@ -41,6 +41,23 @@ func isAllowedHost(u *url.URL) bool {
 	return slices.Contains(cfg.AllowedHosts, host)
 }
 
+func targetUrl(u *url.URL) *url.URL {
+	targetStr := strings.TrimPrefix(u.Path, "/")
+	targetStr = strings.Replace(targetStr, "https:/", "https://", 1) // fix collapsed double slash
+	targetStr = strings.Replace(targetStr, "http:/", "http://", 1)
+
+	destUrl, err := url.Parse(targetStr)
+	if err != nil || destUrl.Scheme == "" || destUrl.Host == "" {
+		return nil
+	}
+	// rebuild the query params
+	if u.RawQuery != "" {
+		destUrl.RawQuery = u.RawQuery
+	}
+
+	return destUrl
+}
+
 // ------------------- middleware -------------------
 
 // Rate limits by IP.

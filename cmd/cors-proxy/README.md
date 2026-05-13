@@ -55,7 +55,7 @@ Access to fetch at 'https://github.com' from origin 'https://...' has been block
 HTTP request through this proxy:
 
 ```js
-const response = await fetch("http://localhost:8080/?url=https://github.com");
+const response = await fetch("http://localhost:8080/https://github.com");
 const html = await response.text();
 console.log(html);
 ```

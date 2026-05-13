@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
 
@@ -50,15 +49,10 @@ func main() {
 }
 
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
-	// get the destination url from query
-	destUrlQuery := r.URL.Query().Get("url")
-	if destUrlQuery == "" {
-		http.Error(w, "'url' query param is missing", http.StatusBadRequest)
-		return
-	}
-	destUrl, err := url.ParseRequestURI(destUrlQuery)
-	if err != nil {
-		http.Error(w, "'url' query param is invalid", http.StatusBadRequest)
+	// get the destination url from path
+	destUrl := targetUrl(r.URL)
+	if destUrl == nil {
+		http.Error(w, "invalid target URL", http.StatusBadRequest)
 		return
 	}
 
